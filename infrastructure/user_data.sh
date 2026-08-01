@@ -6,6 +6,7 @@ REGION="us-east-1"
 S3_RAW="earthquake-pipeline-raw-427706"
 S3_BATCH="earthquake-pipeline-batch-427706"
 REPO="https://github.com/srivenkatborab/Scalable.git"
+DEMO_EIP="50.19.98.60"
 APP=/opt/earthquake
 PY=$APP/venv/bin/python
 PIP=$APP/venv/bin/pip
@@ -88,4 +89,18 @@ systemctl daemon-reload
 systemctl enable --now earthquake-speed.service
 systemctl enable --now earthquake-dashboard.service
 
+# Reclaim the stable demo URL: the ASG may replace this instance at any time, so
+# re-associate the Elastic IP on every boot rather than by hand.
+TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 300" 2>/dev/null)
+IID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
+ALLOC=$(aws ec2 describe-addresses --region $REGION \
+  --query "Addresses[?PublicIp=='$DEMO_EIP'].AllocationId" --output text 2>/dev/null)
+if [ -n "$IID" ] && [ -n "$ALLOC" ] && [ "$ALLOC" != "None" ]; then
+  aws ec2 associate-address --instance-id "$IID" --allocation-id "$ALLOC" \
+    --allow-reassociation --region $REGION && echo "EIP $DEMO_EIP -> $IID"
+fi
+
 echo "earthquake-pipeline ready $(date -u)" > $APP/READY
+echo "dashboard: http://$DEMO_EIP:8501" >> $APP/READY
