@@ -6,9 +6,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 REGION = os.getenv("AWS_REGION", "us-east-1")
-CLUSTER = os.getenv("EMR_CLUSTER_ID", "")
 S3_BATCH = os.getenv("S3_BATCH", "earthquake-pipeline-batch")
+S3_RAW_PATH = os.getenv("S3_RAW_PATH", "s3://earthquake-pipeline-raw/data/")
+S3_BATCH_PATH = os.getenv("S3_BATCH_PATH", "s3://earthquake-pipeline-batch/output/")
 SCRIPT_KEY = os.getenv("BATCH_SCRIPT_KEY", "scripts/batch_job.py")
+
+CLUSTER = os.getenv("EMR_CLUSTER_ID", "")
+if not CLUSTER:
+    _p = os.path.join(os.path.dirname(__file__), "..", "..", "config", "emr_cluster_id.txt")
+    if os.path.exists(_p):
+        CLUSTER = open(_p).read().strip()
 
 emr = boto3.client("emr", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
@@ -32,6 +39,8 @@ def submit(script_s3):
                 "--deploy-mode",
                 "cluster",
                 script_s3,
+                S3_RAW_PATH,
+                S3_BATCH_PATH,
             ],
         },
     }

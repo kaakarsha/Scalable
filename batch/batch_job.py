@@ -1,9 +1,11 @@
 import os
+import sys
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-S3_IN = os.getenv("S3_RAW_PATH", "s3://earthquake-pipeline-raw/data/")
-S3_OUT = os.getenv("S3_BATCH_PATH", "s3://earthquake-pipeline-batch/output/")
+argv = sys.argv[1:]
+S3_IN = argv[0] if len(argv) > 0 else os.getenv("S3_RAW_PATH", "s3://earthquake-pipeline-raw/data/")
+S3_OUT = argv[1] if len(argv) > 1 else os.getenv("S3_BATCH_PATH", "s3://earthquake-pipeline-batch/output/")
 TOP_N = int(os.getenv("TOP_N", "20"))
 
 
