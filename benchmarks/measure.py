@@ -144,45 +144,42 @@ def _plot_speedup(rows):
         print(f"plot skip: {e}")
 
 
-class LatencyReader(threading.Thread):
-    def __init__(self):
-        super().__init__(daemon=True)
-        self.samples = []
-        self.stop_flag = threading.Event()
-        self.count = 0
+def _reader_proc(stream, region, stop_evt, q):
+    import boto3 as _b
 
-    def run(self):
-        shards = kinesis.describe_stream(StreamName=STREAM)["StreamDescription"]["Shards"]
-        its = [
-            kinesis.get_shard_iterator(
-                StreamName=STREAM, ShardId=s["ShardId"], ShardIteratorType="LATEST"
-            )["ShardIterator"]
-            for s in shards
-        ]
-        while not self.stop_flag.is_set():
-            nxt = []
-            for it in its:
-                if not it:
-                    continue
+    k = _b.client("kinesis", region_name=region)
+    shards = k.describe_stream(StreamName=stream)["StreamDescription"]["Shards"]
+    its = [
+        k.get_shard_iterator(
+            StreamName=stream, ShardId=s["ShardId"], ShardIteratorType="LATEST"
+        )["ShardIterator"]
+        for s in shards
+    ]
+    samples = []
+    while not stop_evt.is_set():
+        nxt = []
+        for it in its:
+            if not it:
+                continue
+            try:
+                resp = k.get_records(ShardIterator=it, Limit=1000)
+            except Exception:
+                time.sleep(0.5)
+                nxt.append(it)
+                continue
+            now_ms = time.time() * 1000
+            for rec in resp.get("Records", []):
                 try:
-                    resp = kinesis.get_records(ShardIterator=it, Limit=1000)
+                    body = json.loads(rec["Data"])
+                    sent = body.get("ingested_ms")
+                    if sent:
+                        samples.append((now_ms - sent) / 1000.0)
                 except Exception:
-                    time.sleep(1)
-                    nxt.append(it)
-                    continue
-                now_ms = time.time() * 1000
-                for rec in resp.get("Records", []):
-                    self.count += 1
-                    try:
-                        body = json.loads(rec["Data"])
-                        sent = body.get("ingested_ms")
-                        if sent:
-                            self.samples.append((now_ms - sent) / 1000.0)
-                    except Exception:
-                        pass
-                nxt.append(resp.get("NextShardIterator"))
-            its = nxt
-            time.sleep(0.25)
+                    pass
+            nxt.append(resp.get("NextShardIterator"))
+        its = nxt
+        time.sleep(0.2)
+    q.put(samples)
 
 
 def mode_latency(rates, events_per_rate):
@@ -193,21 +190,32 @@ def mode_latency(rates, events_per_rate):
     loadgen = _util.module_from_spec(spec)
     spec.loader.exec_module(loadgen)
 
+    import multiprocessing as mp
+
     rows = []
     for rate in rates:
         print(f"\n[latency] target rate={rate}/s events={events_per_rate}", flush=True)
-        reader = LatencyReader()
+        ctx = mp.get_context("spawn")
+        stop_evt = ctx.Event()
+        q = ctx.Queue()
+        reader = ctx.Process(target=_reader_proc, args=(STREAM, REGION, stop_evt, q))
         reader.start()
-        time.sleep(3)
+        time.sleep(6)
 
         loadgen._stats.update({"sent": 0, "failed": 0, "throttled": 0, "bytes": 0, "latencies": []})
         r = loadgen.run(events_per_rate, rate, 12, 500, 5000, False)
 
-        time.sleep(8)
-        reader.stop_flag.set()
+        time.sleep(10)
+        stop_evt.set()
+        try:
+            samples = q.get(timeout=30)
+        except Exception:
+            samples = []
         reader.join(timeout=20)
+        if reader.is_alive():
+            reader.terminate()
 
-        s = [x for x in reader.samples if 0 < x < 120]
+        s = [x for x in samples if 0 < x < 120]
         if not s:
             print("  no latency samples captured")
             continue
