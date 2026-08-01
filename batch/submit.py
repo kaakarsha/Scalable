@@ -13,9 +13,12 @@ SCRIPT_KEY = os.getenv("BATCH_SCRIPT_KEY", "scripts/batch_job.py")
 
 CLUSTER = os.getenv("EMR_CLUSTER_ID", "")
 if not CLUSTER:
-    _p = os.path.join(os.path.dirname(__file__), "..", "..", "config", "emr_cluster_id.txt")
-    if os.path.exists(_p):
-        CLUSTER = open(_p).read().strip()
+    _here = os.path.dirname(os.path.abspath(__file__))
+    for _rel in ("../../config", "../config"):
+        _p = os.path.join(_here, _rel, "emr_cluster_id.txt")
+        if os.path.exists(_p):
+            CLUSTER = open(_p).read().strip()
+            break
 
 emr = boto3.client("emr", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)

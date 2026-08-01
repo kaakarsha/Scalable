@@ -18,6 +18,14 @@ emr = boto3.client("emr", region_name=REGION)
 ec2 = boto3.client("ec2", region_name=REGION)
 
 
+def cluster_id_path():
+    here = os.path.dirname(os.path.abspath(__file__))
+    sibling = os.path.join(here, "..", "..", "config", "emr_cluster_id.txt")
+    if os.path.isdir(os.path.dirname(sibling)):
+        return sibling
+    return os.path.join(here, "..", "config", "emr_cluster_id.txt")
+
+
 def default_subnet():
     vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
     if not vpcs:
@@ -92,8 +100,9 @@ def wait_ready(cid):
 
 if __name__ == "__main__":
     cid = launch()
-    here = os.path.join(os.path.dirname(__file__), "..", "..", "config", "emr_cluster_id.txt")
-    with open(os.path.abspath(here), "w") as f:
+    path = os.path.abspath(cluster_id_path())
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
         f.write(cid)
     wait_ready(cid)
     print(f"ready={cid}")
